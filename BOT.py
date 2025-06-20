@@ -100,7 +100,10 @@ st.markdown("""
         font-weight: bold;
     }
     /* Asegurar que las etiquetas de checkbox y slider también sean blancas */
-    .stCheckbox > label, .stSlider > label {
+    .stCheckbox > label,
+    .stSlider > label,
+    .stCheckbox label > div, /* Nuevo selector para el texto anidado dentro del checkbox */
+    .stSlider label > div { /* Nuevo selector para el texto anidado dentro del slider */
         color: var(--text-color-light) !important;
     }
     /* Fondo de las estadísticas - ELIMINADO EN ESTA VERSIÓN */
