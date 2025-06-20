@@ -99,11 +99,17 @@ st.markdown("""
         color: var(--text-color-light) !important;
         font-weight: bold;
     }
-    /* Fondo de las estadísticas */
-    div[data-testid="stMarkdownContainer"] div[data-testid="stMarkdown"] > div:last-child { /* Selects the last div in stMarkdown, assuming it's the stats box */
-        background-color: white !important; /* Fondo blanco puro para las estadísticas */
-        color: var(--bogota-blue-dark) !important; /* Texto oscuro para las estadísticas */
+    /* Asegurar que las etiquetas de checkbox y slider también sean blancas */
+    .stCheckbox > label, .stSlider > label {
+        color: var(--text-color-light) !important;
     }
+    /* Fondo de las estadísticas - ELIMINADO EN ESTA VERSIÓN */
+    /*
+    div[data-testid="stMarkdownContainer"] div[data-testid="stMarkdown"] > div:last-child {
+        background-color: white !important;
+        color: var(--bogota-blue-dark) !important;
+    }
+    */
     </style>
 """, unsafe_allow_html=True)
 
@@ -206,12 +212,11 @@ st.markdown("Filtros, mapa y descarga de información cartográfica según filtr
 # Se asume que estos son los nombres de las columnas en el shapefile cargado
 COLUMNAS_ATRIBUTOS_TEXTO = [
     'id_poligon', 'nombre_pol', 'Tipo_PMon', 'Localidad', 
-    'En_Proceso', 'Provisiona', 'Consolidac', 'Caracter_1', 'Abordaje_s'
+    'En_Proceso', 'Provisiona', 'Consolidac', 'Caracter_1', 'Abordaje_s',
+    'Total_2023', 'Lote_202', 'Lote_203', 'En_Proce_1', 'Provisio_1', 
+    'Consolid_1', 'Total_2025', 'Increment_1'
 ]
-COLUMNAS_ATRIBUTOS_NUMERICOS = [
-    'Área_Ha_', 'Total_2023', 'Lote_202', 'Lote_203', 'En_Proce_1', 
-    'Provisio_1', 'Consolid_1', 'Total_2025', 'Increment_1'
-]
+# 'Área_Ha_' se maneja por separado ya que requiere un formato numérico para el tooltip y tabla.
 
 # Asegurar que las columnas existan y manejar sus tipos
 for col_name in COLUMNAS_ATRIBUTOS_TEXTO:
@@ -220,12 +225,8 @@ for col_name in COLUMNAS_ATRIBUTOS_TEXTO:
     else:
         gdf_total[col_name] = '' # Crea la columna si no existe, con valores vacíos
 
-for col_name in COLUMNAS_ATRIBUTOS_NUMERICOS:
-    if col_name in gdf_total.columns:
-        # Intenta convertir a numérico, si falla, llena con 0
-        gdf_total[col_name] = pd.to_numeric(gdf_total[col_name], errors='coerce').fillna(0)
-    else:
-        gdf_total[col_name] = 0.0 # Crea la columna si no existe, con ceros (flotante para consistencia)
+# Los campos numéricos adicionales (Total_2023, etc.) se tratarán como texto para display
+# No es necesario un bucle explícito para ellos aquí si se desea mostrar tal cual o con formato simple en el tooltip.
 
 st.sidebar.header("🎯 Filtros")
 
@@ -260,9 +261,10 @@ fondo_seleccionado = st.sidebar.selectbox("🗺️ Fondo del mapa", list(fondos_
 st.sidebar.header("🎨 Estilos del Mapa")
 mostrar_relleno = st.sidebar.checkbox("Mostrar relleno de polígonos", value=True)
 
-st.sidebar.header("⚙️ Rendimiento")
-usar_simplify = st.sidebar.checkbox("Simplificar geometría", value=True)
-tolerancia = st.sidebar.slider("Nivel de simplificación", 0.00001, 0.001, 0.0001, step=0.00001, format="%.5f")
+# Sección de Rendimiento (eliminada la opción de simplificar geometría y el header)
+# st.sidebar.header("⚙️ Rendimiento")
+# usar_simplify = st.sidebar.checkbox("Simplificar geometría", value=True)
+# tolerancia = st.sidebar.slider("Nivel de simplificación", 0.00001, 0.001, 0.0001, step=0.00001, format="%.5f")
 
 # Botones de acción
 if "mostrar_mapa" not in st.session_state:
@@ -291,22 +293,24 @@ if st.session_state["mostrar_mapa"]:
         # Convertir el nombre seleccionado a minúsculas para coincidir con los datos
         gdf_filtrado = gdf_filtrado[gdf_filtrado["nombre_pol"] == nombre_pol_seleccionado.lower()]
 
-    if usar_simplify and not gdf_filtrado.empty:
-        st.info(f"Geometrías simplificadas con tolerancia de {tolerancia}")
-        gdf_filtrado["geometry"] = gdf_filtrado["geometry"].simplify(tolerancia, preserve_topology=True)
+    # La lógica de simplificación de geometría ha sido eliminada
+    # if usar_simplify and not gdf_filtrado.empty:
+    #    st.info(f"Geometrías simplificadas con tolerancia de {tolerancia}")
+    #    gdf_filtrado["geometry"] = gdf_filtrado["geometry"].simplify(tolerancia, preserve_topology=True)
 
     st.subheader("🗺️ Mapa filtrado")
 
     if not gdf_filtrado.empty:
         # Formatear el área para mostrar en el tooltip
-        gdf_filtrado["area_formateada"] = gdf_filtrado["Área_Ha_"].apply(
-            lambda ha: f"{int(ha):,} ha + {int(round((ha - int(ha)) * 10000)):,} m²" if ha >= 0 else "N/A"
-        )
+        if 'Área_Ha_' in gdf_filtrado.columns:
+            gdf_filtrado["area_formateada"] = gdf_filtrado["Área_Ha_"].apply(
+                lambda ha: f"{int(ha):,} ha + {int(round((ha - int(ha)) * 10000)):,} m²" if ha >= 0 else "N/A"
+            )
+        else:
+            gdf_filtrado["area_formateada"] = "N/A"
         
-        # Formatear columnas numéricas para el tooltip
-        for col_num in [col for col in COLUMNAS_ATRIBUTOS_NUMERICOS if col not in ['Área_Ha_']]:
-            if col_num in gdf_filtrado.columns:
-                gdf_filtrado[f"{col_num}_str"] = gdf_filtrado[col_num].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
+        # Las columnas numéricas (excepto Área_Ha_) se mostrarán como están (strings por el procesamiento inicial)
+        # No se requiere un formateo específico de "_str" aquí para el tooltip ya que no se realizan cálculos con ellas.
 
         bounds = gdf_filtrado.total_bounds
         centro_lat = (bounds[1] + bounds[3]) / 2
@@ -325,6 +329,7 @@ if st.session_state["mostrar_mapa"]:
                 }
 
             # Campos y alias para el tooltip (ajustados a los nuevos atributos del shapefile)
+            # Aseguramos que 'area_formateada' esté siempre disponible para el tooltip.
             tooltip_fields = [
                 "id_poligon", "nombre_pol", "Tipo_PMon", "Localidad", "area_formateada",
                 "En_Proceso", "Provisiona", "Consolidac", "Total_2023", "Lote_202",
@@ -338,13 +343,14 @@ if st.session_state["mostrar_mapa"]:
                 "Incremento 1:", "Carácter:", "Abordaje:"
             ]
             
-            # Ajustar los campos del tooltip para incluir las versiones _str de los numéricos
+            # Filtrar los campos del tooltip para incluir solo los que realmente existen en gdf_filtrado
+            # Y usar los nombres originales de las columnas, excepto para el área formateada.
             final_tooltip_fields = []
-            for field in tooltip_fields:
-                if field in gdf_filtrado.columns and gdf_filtrado[field].dtype in ['float64', 'int64'] and field != 'Área_Ha_':
-                    final_tooltip_fields.append(f"{field}_str")
-                else:
+            final_tooltip_aliases = []
+            for i, field in enumerate(tooltip_fields):
+                if field in gdf_filtrado.columns or field == 'area_formateada':
                     final_tooltip_fields.append(field)
+                    final_tooltip_aliases.append(tooltip_aliases[i])
 
 
             folium.GeoJson(
@@ -353,7 +359,7 @@ if st.session_state["mostrar_mapa"]:
                 style_function=style_function,
                 tooltip=folium.GeoJsonTooltip(
                     fields=final_tooltip_fields,
-                    aliases=tooltip_aliases,
+                    aliases=final_tooltip_aliases,
                     localize=True
                 )
             ).add_to(m)
@@ -389,51 +395,16 @@ if st.session_state["mostrar_mapa"]:
 
         # Crear una copia para la visualización y formatear los números si es necesario
         gdf_filtrado_display = gdf_filtrado[cols_to_display_main_viewer].copy()
-        for col_num in [col for col in COLUMNAS_ATRIBUTOS_NUMERICOS if col in gdf_filtrado_display.columns]:
-            # No formatear 'Área_Ha_' ya que se hace por separado para el tooltip
-            if col_num != 'Área_Ha_':
-                gdf_filtrado_display[col_num] = gdf_filtrado_display[col_num].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
-
+        # No se requiere formateo de números adicionales ya que las columnas originales
+        # ya se procesaron a string al cargar, excepto Área_Ha_ que se formateará para display.
+        if 'Área_Ha_' in gdf_filtrado_display.columns:
+            gdf_filtrado_display['Área_Ha_'] = gdf_filtrado_display['Área_Ha_'].apply(
+                lambda x: f"{int(x):,} ha + {int(round((x - int(x)) * 10000)):,} m²" if pd.notna(x) and x >= 0 else "N/A"
+            )
 
         st.dataframe(gdf_filtrado_display)
 
-        # Estadísticas resumidas (ajustadas a los nuevos atributos)
-        total_poligonos = len(gdf_filtrado)
-        
-        # Verificar si 'Área_Ha_' existe antes de intentar sumarla
-        if 'Área_Ha_' in gdf_filtrado.columns:
-            area_total = gdf_filtrado["Área_Ha_"].sum()
-            hectareas = int(area_total)
-            metros2 = int(round((area_total - hectareas) * 10000))
-            area_display = f"Área Cartográfica Total: <strong>{hectareas:,} ha + {metros2:,} m²</strong><br>"
-        else:
-            area_display = "Área Cartográfica Total: N/A (Columna 'Área_Ha_' no encontrada)<br>"
-            
-
-        # Conteo por Tipo_PMon y Localidad
-        conteo_tipo_pmon = gdf_filtrado['Tipo_PMon'].value_counts().to_dict()
-        conteo_localidad = gdf_filtrado['Localidad'].value_counts().to_dict()
-
-        st.markdown(
-            f'''
-            <div style='
-                margin-top: 1em;
-                margin-bottom: 1.5em;
-                padding: 0.7em;
-                background-color: white; /* Fondo blanco puro para las estadísticas */
-                border-radius: 8px;
-                font-size: 16px;
-                color: var(--bogota-blue-dark); /* Texto oscuro para las estadísticas */
-            '>
-                <strong>📊 Estadísticas del resultado:</strong><br>
-                Polígonos filtrados: <strong>{total_poligonos}</strong><br>
-                {area_display}
-                Conteo por Tipo de Monitoreo: {conteo_tipo_pmon}<br>
-                Conteo por Localidad: {conteo_localidad}
-            </div>
-            ''',
-            unsafe_allow_html=True
-        )
+        # Estadísticas resumidas - ELIMINADAS EN ESTA VERSIÓN
 
         with st.expander("📥 Opciones de descarga"):
             # Para descargar el shapefile filtrado
@@ -465,15 +436,14 @@ if st.session_state["mostrar_mapa"]:
                 mime="text/html"
             )
 
-            # Descargar tabla como CSV
-            # Asegurarse de que el CSV de descarga use las columnas formateadas para display
-            csv_data = gdf_filtrado_display.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📄 Descargar tabla como CSV",
-                data=csv_data,
-                file_name="resultados_monitoreo_filtrados.csv",
-                mime="text/csv"
-            )
+            # Descargar tabla como CSV - ELIMINADA EN ESTA VERSIÓN
+            # csv_data = gdf_filtrado_display.to_csv(index=False).encode("utf-8")
+            # st.download_button(
+            #     label="📄 Descargar tabla como CSV",
+            #     data=csv_data,
+            #     file_name="resultados_monitoreo_filtrados.csv",
+            #     mime="text/csv"
+            # )
     else:
         st.info("No hay datos para mostrar en la tabla o descargar con los filtros actuales.")
 
