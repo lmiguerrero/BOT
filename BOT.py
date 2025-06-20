@@ -1,5 +1,5 @@
-# --- VISOR DE POLÍGONOS DE MONITOREO CON ANÁLISIS DE OCUPACIONES 20/06/2025 ---
-# --- Visor de polígonos y análisis espacial con capa de puntos ---
+# --- VISOR DE POLÍGONOS DE MONITOREO UNIFICADO 20/06/2025 ---
+# --- Visor de polígonos y análisis de ocupaciones en una sola vista ---
 # --- Miguel Guerrero / Adaptado por Gemini ---
 
 import streamlit as st
@@ -13,7 +13,7 @@ import requests
 from io import BytesIO
 from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Mapanima - Geovisor de Polígonos de Monitoreo y Análisis", layout="wide")
+st.set_page_config(page_title="Mapanima - Geovisor de Monitoreo Unificado", layout="wide")
 
 # --- Estilos generales e institucionales (Actualizados con la marca Bogotá) ---
 st.markdown("""
@@ -106,6 +106,16 @@ st.markdown("""
     .stSlider label > div { /* Nuevo selector para el texto anidado dentro del slider */
         color: var(--text-color-light) !important;
     }
+    /* Estilo para el cuadro de estadísticas de ocupaciones */
+    .stats-box {
+        margin-top: 1em;
+        margin-bottom: 1.5em;
+        padding: 0.7em;
+        background-color: white; /* Fondo blanco puro */
+        border-radius: 8px;
+        font-size: 16px;
+        color: var(--bogota-blue-dark); /* Texto oscuro */
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -143,16 +153,11 @@ def descargar_y_cargar_zip(url):
                     if gdf is not None and gdf.crs != "EPSG:4326":
                         st.info("ℹ️ Reproyectando datos a EPSG:4326 para compatibilidad con el mapa.")
                         gdf = gdf.to_crs(epsg=4326)
-
-                    # Asegurarse de que 'Área_Ha_' sea numérica y sin NaN si existe
-                    if gdf is not None and 'Área_Ha_' in gdf.columns:
-                        gdf['Área_Ha_'] = pd.to_numeric(gdf['Área_Ha_'], errors='coerce').fillna(0).round(2)
                     
                     # Rellenar valores NaN con una cadena vacía y luego convertir todas las columnas no geométricas a tipo string
                     if gdf is not None:
                         for col in gdf.columns:
-                            # Evitar convertir 'Área_Ha_' a string si es una columna numérica
-                            if col != gdf.geometry.name and col != 'Área_Ha_': 
+                            if col != gdf.geometry.name:
                                 gdf[col] = gdf[col].fillna('').astype(str) 
 
                     return gdf
@@ -241,351 +246,318 @@ gdf_puntos = descargar_y_cargar_zip_puntos(url_zip_puntos)
 # --- Banner superior del visor ---
 with st.container():
     st.image("https://placehold.co/800x100/1C3F93/FFFFFF?text=VISOR+GEOGRÁFICO", use_container_width=True) # 
-# --- Pestañas del visor ---
-tab1, tab2 = st.tabs(["🗺️ Visor Principal", "📊 Análisis de Ocupaciones"])
+# --- VISOR PRINCIPAL (TODO EN UNA PESTAÑA) ---
+if gdf_poligonos is None:
+    st.warning("⚠️ No se pudieron cargar los datos de polígonos principales. El visor no puede funcionar sin ellos.")
+    st.stop() 
 
-# --- TAB 1: VISOR PRINCIPAL (Polígonos) ---
-with tab1:
-    if gdf_poligonos is None:
-        st.warning("⚠️ No se pudieron cargar los datos de polígonos principales. El visor no puede funcionar sin ellos.")
-        st.stop() 
+st.subheader("🗺️ Visor de Polígonos de Monitoreo y Ocupaciones")
+st.markdown("Filtros, mapa y descarga de información cartográfica según filtros aplicados.")
 
-    st.subheader("🗺️ Visor de Polígonos de Monitoreo")
-    st.markdown("Filtros, mapa y descarga de información cartográfica según filtros aplicados.")
+# --- Nombres de columnas relevantes para polígonos ---
+COLUMNAS_ATRIBUTOS_POLIGONOS = [
+    'id_poligon', 'nombre_pol', 'Tipo_PMon', 'Localidad', 
+    'En_Proceso', 'Provisiona', 'Consolidac', 'Caracter_1', 'Abordaje_s',
+    'Total_2023', 'Lote_202', 'Lote_203', 'En_Proce_1', 'Provisio_1', 
+    'Consolid_1', 'Total_2025', 'Increment_1'
+]
+# Las columnas del shapefile de puntos se manejarán al activar la opción de ocupaciones.
 
-    # --- Nombres de columnas relevantes para polígonos ---
-    COLUMNAS_ATRIBUTOS_POLIGONOS = [
-        'id_poligon', 'nombre_pol', 'Tipo_PMon', 'Localidad', 
-        'En_Proceso', 'Provisiona', 'Consolidac', 'Caracter_1', 'Abordaje_s',
-        'Total_2023', 'Lote_202', 'Lote_203', 'En_Proce_1', 'Provisio_1', 
-        'Consolid_1', 'Total_2025', 'Increment_1'
-    ]
+# Asegurar que las columnas existan y manejar sus tipos para polígonos
+for col_name in COLUMNAS_ATRIBUTOS_POLIGONOS:
+    if col_name in gdf_poligonos.columns:
+        gdf_poligonos[col_name] = gdf_poligonos[col_name].astype(str).str.lower().fillna('')
+    else:
+        gdf_poligonos[col_name] = '' 
 
-    # Asegurar que las columnas existan y manejar sus tipos para polígonos
-    for col_name in COLUMNAS_ATRIBUTOS_POLIGONOS:
-        if col_name in gdf_poligonos.columns:
-            gdf_poligonos[col_name] = gdf_poligonos[col_name].astype(str).str.lower().fillna('')
-        else:
-            gdf_poligonos[col_name] = '' 
+st.sidebar.header("🎯 Filtros")
 
-    st.sidebar.header("🎯 Filtros Polígonos")
+# Filtro por 'Localidad' (multiselect)
+localidad_opciones = sorted(gdf_poligonos['Localidad'].unique())
+localidad_sel = st.sidebar.multiselect(
+    "Filtrar por Localidad", 
+    options=localidad_opciones, 
+    placeholder="Selecciona una o más localidades"
+)
 
-    # Filtro por 'Localidad' (multiselect) - POLÍGONOS
-    localidad_opciones_poligonos = sorted(gdf_poligonos['Localidad'].unique())
-    localidad_sel_poligonos = st.sidebar.multiselect(
-        "Filtrar por Localidad (Polígonos)", 
-        options=localidad_opciones_poligonos, 
-        placeholder="Selecciona una o más localidades"
-    )
+# Filtro por 'nombre_pol' (selectbox, una sola selección)
+nombre_pol_opciones = sorted(gdf_poligonos['nombre_pol'].unique())
+nombre_pol_seleccionado = st.sidebar.selectbox(
+    "🔍 Buscar por nombre de Polígono (nombre_pol)", 
+    options=[""] + nombre_pol_opciones, 
+    index=0, 
+    placeholder="Selecciona un nombre"
+)
 
-    # Filtro por 'nombre_pol' (selectbox, una sola selección) - POLÍGONOS
-    nombre_pol_opciones_poligonos = sorted(gdf_poligonos['nombre_pol'].unique())
-    nombre_pol_seleccionado_poligonos = st.sidebar.selectbox(
-        "🔍 Buscar por nombre de Polígono (nombre_pol)", 
-        options=[""] + nombre_pol_opciones_poligonos, 
-        index=0, 
-        placeholder="Selecciona un nombre"
-    )
+# Sección de configuración del mapa
+fondos_disponibles = {
+    "OpenStreetMap": "OpenStreetMap",
+    "CartoDB Claro (Positron)": "CartoDB positron",
+    "CartoDB Oscuro": "CartoDB dark_matter",
+    "Satélite (Esri)": "Esri.WorldImagery",
+    "Esri NatGeo World Map": "Esri.NatGeoWorldMap",
+    "Esri World Topo Map": "Esri.WorldTopoMap"
+}
+fondo_seleccionado = st.sidebar.selectbox("🗺️ Fondo del mapa", list(fondos_disponibles.keys()), index=1)
 
-    # Sección de configuración del mapa (se mantiene)
-    fondos_disponibles = {
-        "OpenStreetMap": "OpenStreetMap",
-        "CartoDB Claro (Positron)": "CartoDB positron",
-        "CartoDB Oscuro": "CartoDB dark_matter",
-        "Satélite (Esri)": "Esri.WorldImagery",
-        "Esri NatGeo World Map": "Esri.NatGeoWorldMap",
-        "Esri World Topo Map": "Esri.WorldTopoMap"
-    }
-    fondo_seleccionado_poligonos = st.sidebar.selectbox("🗺️ Fondo del mapa (Polígonos)", list(fondos_disponibles.keys()), index=1)
+st.sidebar.header("🎨 Estilos del Mapa")
+mostrar_relleno_poligonos = st.sidebar.checkbox("Mostrar relleno de polígonos", value=True)
 
-    st.sidebar.header("🎨 Estilos del Mapa Polígonos")
-    mostrar_relleno_poligonos = st.sidebar.checkbox("Mostrar relleno de polígonos", value=True)
+# --- Nueva opción para ver ocupaciones ---
+if gdf_puntos is not None:
+    ver_ocupaciones = st.sidebar.checkbox("Ver ocupaciones", value=False)
+else:
+    ver_ocupaciones = False
+    st.sidebar.info("Capa de ocupaciones no disponible para visualización.")
 
-    # Botones de acción para polígonos
-    if "mostrar_mapa_poligonos" not in st.session_state:
-        st.session_state["mostrar_mapa_poligonos"] = False
 
-    col_botones_poligonos = st.sidebar.columns(2)
-    with col_botones_poligonos[0]:
-        if st.button("🧭 Aplicar filtros y mostrar mapa (Polígonos)"):
-            st.session_state["mostrar_mapa_poligonos"] = True
-    with col_botones_poligonos[1]:
-        if st.button("🔄 Reiniciar visor (Polígonos)"):
-            st.session_state["mostrar_mapa_poligonos"] = False
-            st.rerun()
+# Botones de acción
+if "mostrar_mapa" not in st.session_state:
+    st.session_state["mostrar_mapa"] = False
 
-    if st.session_state["mostrar_mapa_poligonos"]:
-        gdf_filtrado_poligonos = gdf_poligonos.copy()
-        
-        # Aplicar filtros a polígonos
-        if localidad_sel_poligonos:
-            localidad_sel_poligonos_lower = [loc.lower() for loc in localidad_sel_poligonos]
-            gdf_filtrado_poligonos = gdf_filtrado_poligonos[gdf_filtrado_poligonos["Localidad"].isin(localidad_sel_poligonos_lower)]
-        
-        if nombre_pol_seleccionado_poligonos and nombre_pol_seleccionado_poligonos != "":
-            gdf_filtrado_poligonos = gdf_filtrado_poligonos[gdf_filtrado_poligonos["nombre_pol"] == nombre_pol_seleccionado_poligonos.lower()]
+col_botones = st.sidebar.columns(2)
+with col_botones[0]:
+    if st.button("🧭 Aplicar filtros y mostrar mapa"):
+        st.session_state["mostrar_mapa"] = True
+with col_botones[1]:
+    if st.button("🔄 Reiniciar visor"):
+        st.session_state["mostrar_mapa"] = False
+        st.rerun()
 
-        st.subheader("🗺️ Mapa de Polígonos filtrado")
+# Lógica para mostrar el mapa y la tabla de resultados
+if st.session_state["mostrar_mapa"]:
+    gdf_filtrado_poligonos = gdf_poligonos.copy()
+    gdf_puntos_filtrados = None
+    total_ocupaciones_filtradas = 0
 
-        if not gdf_filtrado_poligonos.empty:
-            if 'Área_Ha_' in gdf_filtrado_poligonos.columns:
-                gdf_filtrado_poligonos["area_formateada"] = gdf_filtrado_poligonos["Área_Ha_"].apply(
-                    lambda ha: f"{int(ha):,} ha + {int(round((ha - int(ha)) * 10000)):,} m²" if ha >= 0 else "N/A"
-                )
+    # Aplicar filtros a polígonos
+    if localidad_sel:
+        localidad_sel_lower = [loc.lower() for loc in localidad_sel]
+        gdf_filtrado_poligonos = gdf_filtrado_poligonos[gdf_filtrado_poligonos["Localidad"].isin(localidad_sel_lower)]
+    
+    if nombre_pol_seleccionado and nombre_pol_seleccionado != "":
+        gdf_filtrado_poligonos = gdf_filtrado_poligonos[gdf_filtrado_poligonos["nombre_pol"] == nombre_pol_seleccionado.lower()]
+
+    st.subheader("🗺️ Mapa filtrado")
+
+    if not gdf_filtrado_poligonos.empty:
+        # Preparar GeoDataFrame de puntos para el join y visualización si aplica
+        if ver_ocupaciones and gdf_puntos is not None:
+            st.info("Realizando análisis espacial de ocupaciones...")
+            # Asegúrate de que los CRS sean los mismos para el sjoin
+            if gdf_poligonos.crs != gdf_puntos.crs:
+                gdf_puntos_temp = gdf_puntos.to_crs(gdf_poligonos.crs)
             else:
-                gdf_filtrado_poligonos["area_formateada"] = "N/A"
-            
-            bounds_poligonos = gdf_filtrado_poligonos.total_bounds
-            centro_lat_poligonos = (bounds_poligonos[1] + bounds_poligonos[3]) / 2
-            centro_lon_poligonos = (bounds_poligonos[0] + bounds_poligonos[2]) / 2
-            
-            with st.spinner("Generando mapa de polígonos..."):
-                m_poligonos = folium.Map(location=[centro_lat_poligonos, centro_lon_poligonos], zoom_start=8, tiles=fondos_disponibles[fondo_seleccionado_poligonos])
+                gdf_puntos_temp = gdf_puntos.copy()
 
-                def style_function_poligonos(feature):
-                    return {
-                        "fillColor": "#5B8EE6",
-                        "color": "#1C3F93",
-                        "weight": 1.5,
-                        "fillOpacity": 0.6 if mostrar_relleno_poligonos else 0
-                    }
-
-                tooltip_fields_poligonos = [
-                    "id_poligon", "nombre_pol", "Tipo_PMon", "Localidad", "area_formateada",
-                    "En_Proceso", "Provisiona", "Consolidac", "Caracter_1", "Abordaje_s",
-                    "Total_2023", "Lote_202", "Lote_203", "En_Proce_1", "Provisio_1", 
-                    "Consolid_1", "Total_2025", "Increment_1"
-                ]
-                tooltip_aliases_poligonos = [
-                    "ID Polígono:", "Nombre Polígono:", "Tipo Monitoreo:", "Localidad:", "Área (Ha):",
-                    "En Proceso:", "Provisional:", "Consolidado:", "Carácter:", "Abordaje:",
-                    "Total 2023:", "Lote 202:", "Lote 203:", "En Proceso 1:", "Provisional 1:", 
-                    "Consolidado 1:", "Total 2025:", "Incremento 1:"
-                ]
+            # Realizar spatial join para obtener solo los puntos dentro de los polígonos filtrados
+            # y obtener los atributos del polígono para el conteo
+            try:
+                gdf_puntos_en_poligonos = gpd.sjoin(gdf_puntos_temp, gdf_filtrado_poligonos[['geometry', 'id_poligon']], how="inner", predicate="within")
                 
-                final_tooltip_fields_poligonos = []
-                final_tooltip_aliases_poligonos = []
-                for i, field in enumerate(tooltip_fields_poligonos):
-                    if field in gdf_filtrado_poligonos.columns or field == 'area_formateada':
-                        final_tooltip_fields_poligonos.append(field)
-                        final_tooltip_aliases_poligonos.append(tooltip_aliases_poligonos[i])
+                # Contar ocupaciones por polígono
+                conteo_ocupaciones = gdf_puntos_en_poligonos.groupby('id_poligon').size().reset_index(name='Cantidad_Ocupaciones')
+                total_ocupaciones_filtradas = conteo_ocupaciones['Cantidad_Ocupaciones'].sum()
 
+                # Unir el conteo a los polígonos filtrados para mostrar en la tabla y tooltip
+                gdf_filtrado_poligonos = pd.merge(
+                    gdf_filtrado_poligonos,
+                    conteo_ocupaciones,
+                    on='id_poligon',
+                    how='left'
+                ).fillna({'Cantidad_Ocupaciones': 0})
+                gdf_filtrado_poligonos['Cantidad_Ocupaciones'] = gdf_filtrado_poligonos['Cantidad_Ocupaciones'].astype(int)
+
+                gdf_puntos_filtrados = gdf_puntos_en_poligonos # Usar estos puntos para la visualización
+
+            except Exception as e:
+                st.error(f"❌ Error durante el análisis espacial de ocupaciones: {e}")
+                gdf_puntos_filtrados = None # No mostrar puntos si hay error
+
+        bounds = gdf_filtrado_poligonos.total_bounds
+        centro_lat = (bounds[1] + bounds[3]) / 2
+        centro_lon = (bounds[0] + bounds[2]) / 2
+        
+        with st.spinner("Generando mapa..."):
+            m = folium.Map(location=[centro_lat, centro_lon], zoom_start=8, tiles=fondos_disponibles[fondo_seleccionado])
+
+            def style_function_poligonos(feature):
+                return {
+                    "fillColor": "#5B8EE6",
+                    "color": "#1C3F93",
+                    "weight": 1.5,
+                    "fillOpacity": 0.6 if mostrar_relleno_poligonos else 0
+                }
+
+            tooltip_fields_poligonos = [
+                "id_poligon", "nombre_pol", "Tipo_PMon", "Localidad",
+                "En_Proceso", "Provisiona", "Consolidac", "Caracter_1", "Abordaje_s",
+                "Total_2023", "Lote_202", "Lote_203", "En_Proce_1", "Provisio_1", 
+                "Consolid_1", "Total_2025", "Increment_1"
+            ]
+            tooltip_aliases_poligonos = [
+                "ID Polígono:", "Nombre Polígono:", "Tipo Monitoreo:", "Localidad:",
+                "En Proceso:", "Provisional:", "Consolidado:", "Carácter:", "Abordaje:",
+                "Total 2023:", "Lote 202:", "Lote 203:", "En Proceso 1:", "Provisional 1:", 
+                "Consolidado 1:", "Total 2025:", "Incremento 1:"
+            ]
+
+            if ver_ocupaciones and gdf_puntos is not None and 'Cantidad_Ocupaciones' in gdf_filtrado_poligonos.columns:
+                tooltip_fields_poligonos.append('Cantidad_Ocupaciones')
+                tooltip_aliases_poligonos.append('Ocupaciones en Polígono:')
+            
+            final_tooltip_fields_poligonos = []
+            final_tooltip_aliases_poligonos = []
+            for i, field in enumerate(tooltip_fields_poligonos):
+                if field in gdf_filtrado_poligonos.columns:
+                    final_tooltip_fields_poligonos.append(field)
+                    final_tooltip_aliases_poligonos.append(tooltip_aliases_poligonos[i])
+
+
+            folium.GeoJson(
+                gdf_filtrado_poligonos,
+                name="Polígonos de Monitoreo",
+                style_function=style_function_poligonos,
+                tooltip=folium.GeoJsonTooltip(
+                    fields=final_tooltip_fields_poligonos,
+                    aliases=final_tooltip_aliases_poligonos,
+                    localize=True
+                )
+            ).add_to(m)
+
+            # Añadir capa de puntos si 'Ver ocupaciones' está marcado y hay puntos filtrados
+            if ver_ocupaciones and gdf_puntos_filtrados is not None and not gdf_puntos_filtrados.empty:
+                tooltip_fields_puntos = ['id_ocupac', 'Clasific', 'id_predio', 'Localidad', 'Fecha_Ocu', 'Observacio']
+                tooltip_aliases_puntos = ['ID Ocupación:', 'Clasificación:', 'ID Predio:', 'Localidad:', 'Fecha Ocupación:', 'Observación:']
+                
+                final_tooltip_fields_puntos = []
+                final_tooltip_aliases_puntos = []
+                for i, field in enumerate(tooltip_fields_puntos):
+                    if field in gdf_puntos_filtrados.columns:
+                        final_tooltip_fields_puntos.append(field)
+                        final_tooltip_aliases_puntos.append(tooltip_aliases_puntos[i])
 
                 folium.GeoJson(
-                    gdf_filtrado_poligonos,
-                    name="Polígonos de Monitoreo",
-                    style_function=style_function_poligonos,
+                    gdf_puntos_filtrados,
+                    name="Ocupaciones Filtradas",
+                    marker=folium.CircleMarker(radius=5, fill_color="#FF0000", color="#FF0000", fill_opacity=0.7),
                     tooltip=folium.GeoJsonTooltip(
-                        fields=final_tooltip_fields_poligonos,
-                        aliases=final_tooltip_aliases_poligonos,
+                        fields=final_tooltip_fields_puntos,
+                        aliases=final_tooltip_aliases_puntos,
                         localize=True
                     )
-                ).add_to(m_poligonos)
+                ).add_to(m)
+            
+            folium.LayerControl().add_to(m) # Añadir control de capas
 
-                m_poligonos.fit_bounds([[bounds_poligonos[1], bounds_poligonos[0]], [bounds_poligonos[3], bounds_poligonos[2]]])
+            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-                leyenda_html_poligonos = '''
-                <div style="position: absolute; bottom: 10px; right: 10px; z-index: 9999;
-                            background-color: white; padding: 10px; border: 1px solid #ccc;
-                            font-size: 14px; box-shadow: 2px 2px 4px rgba(0,0,0,0.1);">
-                    <strong>Leyenda</strong><br>
-                    <i style="background:#5B8EE6; opacity:0.7; width:10px; height:10px; display:inline-block; border:1px solid #1C3F93;"></i> Polígono de Monitoreo<br>
+            leyenda_html_poligonos = '''
+            <div style="position: absolute; bottom: 10px; right: 10px; z-index: 9999;
+                        background-color: white; padding: 10px; border: 1px solid #ccc;
+                        font-size: 14px; box-shadow: 2px 2px 4px rgba(0,0,0,0.1);">
+                <strong>Leyenda</strong><br>
+                <i style="background:#5B8EE6; opacity:0.7; width:10px; height:10px; display:inline-block; border:1px solid #1C3F93;"></i> Polígono de Monitoreo<br>
+                <i style="background:#FF0000; opacity:0.7; width:10px; height:10px; display:inline-block; border:1px solid #FF0000;"></i> Ocupación (Punto)<br>
+            </div>
+            '''
+            m.get_root().html.add_child(folium.Element(leyenda_html_poligonos))
+
+            st_folium(m, width=1200, height=600)
+    else:
+        st.warning("⚠️ No se encontraron polígonos que coincidan con los filtros aplicados. Por favor, ajusta tus selecciones.")
+
+    st.subheader("📋 Resultados filtrados")
+    if not gdf_filtrado_poligonos.empty:
+        cols_to_display_poligonos = [
+            "id_poligon", "nombre_pol", "Tipo_PMon", "Localidad",
+            "En_Proceso", "Provisiona", "Consolidac", "Total_2023", "Lote_202",
+            "Lote_203", "En_Proce_1", "Provisio_1", "Consolid_1", "Total_2025",
+            "Increment_1", "Caracter_1", "Abordaje_s"
+        ]
+        if 'Cantidad_Ocupaciones' in gdf_filtrado_poligonos.columns:
+            cols_to_display_poligonos.append('Cantidad_Ocupaciones')
+
+        cols_to_display_poligonos = [col for col in cols_to_display_poligonos if col in gdf_filtrado_poligonos.columns]
+
+        gdf_filtrado_display_poligonos = gdf_filtrado_poligonos[cols_to_display_poligonos].copy()
+
+        st.dataframe(gdf_filtrado_display_poligonos)
+
+        # Cuadro de estadísticas de ocupaciones
+        if ver_ocupaciones and gdf_puntos is not None:
+            st.markdown(
+                f'''
+                <div class="stats-box">
+                    <strong>📊 Estadísticas de Ocupaciones:</strong><br>
+                    Ocupaciones visibles en polígonos filtrados: <strong>{total_ocupaciones_filtradas}</strong>
                 </div>
-                '''
-                m_poligonos.get_root().html.add_child(folium.Element(leyenda_html_poligonos))
+                ''',
+                unsafe_allow_html=True
+            )
 
-                st_folium(m_poligonos, width=1200, height=600)
-        else:
-            st.warning("⚠️ No se encontraron polígonos que coincidan con los filtros aplicados. Por favor, ajusta tus selecciones.")
+        with st.expander("📥 Opciones de descarga"):
+            # Para descargar el shapefile de polígonos filtrados
+            zip_buffer_poligonos = BytesIO()
+            with zipfile.ZipFile(zip_buffer_poligonos, 'w', zipfile.ZIP_DEFLATED) as zf:
+                with tempfile.TemporaryDirectory() as tmpdir_export_poligonos:
+                    shp_base_path_poligonos = os.path.join(tmpdir_export_poligonos, "poligonos_monitoreo_filtrados")
+                    gdf_filtrado_for_save_poligonos = gdf_filtrado_poligonos.copy()
+                    if gdf_filtrado_for_save_poligonos.crs is None:
+                        gdf_filtrado_for_save_poligonos.set_crs(epsg=4326, inplace=True)
+                    # Excluir 'Cantidad_Ocupaciones' si no quieres que sea parte del shapefile, o conviértela si es necesario.
+                    # Para simplificar, la guardamos tal cual, GeoPandas manejará el tipo de columna.
+                    gdf_filtrado_for_save_poligonos.to_file(shp_base_path_poligonos + ".shp")
 
-        st.subheader("📋 Resultados filtrados (Polígonos)")
-        if not gdf_filtrado_poligonos.empty:
-            cols_to_display_poligonos = [
-                "id_poligon", "nombre_pol", "Tipo_PMon", "Localidad", "Área_Ha_",
-                "En_Proceso", "Provisiona", "Consolidac", "Total_2023", "Lote_202",
-                "Lote_203", "En_Proce_1", "Provisio_1", "Consolid_1", "Total_2025",
-                "Increment_1", "Caracter_1", "Abordaje_s"
-            ]
-            cols_to_display_poligonos = [col for col in cols_to_display_poligonos if col in gdf_filtrado_poligonos.columns]
+                    for file in os.listdir(tmpdir_export_poligonos):
+                        zf.write(os.path.join(tmpdir_export_poligonos, file), file)
+            zip_buffer_poligonos.seek(0)
 
-            gdf_filtrado_display_poligonos = gdf_filtrado_poligonos[cols_to_display_poligonos].copy()
-            if 'Área_Ha_' in gdf_filtrado_display_poligonos.columns:
-                gdf_filtrado_display_poligonos['Área_Ha_'] = gdf_filtrado_display_poligonos['Área_Ha_'].apply(
-                    lambda x: f"{int(x):,} ha + {int(round((x - int(x)) * 10000)):,} m²" if pd.notna(x) and x >= 0 else "N/A"
-                )
+            st.download_button(
+                label="📅 Descargar shapefile de polígonos filtrado (.zip)",
+                data=zip_buffer_poligonos.getvalue(),
+                file_name="poligonos_monitoreo_filtrados.zip",
+                mime="application/zip"
+            )
 
-            st.dataframe(gdf_filtrado_display_poligonos)
+            # Descargar mapa HTML
+            html_bytes_mapa = m.get_root().render().encode("utf-8")
+            st.download_button(
+                label="🌐 Descargar mapa (HTML)",
+                data=html_bytes_mapa,
+                file_name="mapa_monitoreo_filtrado.html",
+                mime="text/html"
+            )
 
-            with st.expander("📥 Opciones de descarga (Polígonos)"):
-                zip_buffer = BytesIO()
-                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                    with tempfile.TemporaryDirectory() as tmpdir_export:
-                        shp_base_path = os.path.join(tmpdir_export, "poligonos_monitoreo_filtrados")
-                        gdf_filtrado_for_save = gdf_filtrado_poligonos.copy()
-                        if gdf_filtrado_for_save.crs is None:
-                            gdf_filtrado_for_save.set_crs(epsg=4326, inplace=True)
-                        gdf_filtrado_for_save.to_file(shp_base_path + ".shp")
+            # Descargar tabla de resultados como CSV (ahora incluye Cantidad_Ocupaciones)
+            csv_resultados = gdf_filtrado_display_poligonos.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📄 Descargar tabla de resultados como CSV",
+                data=csv_resultados,
+                file_name="resultados_filtrados.csv",
+                mime="text/csv"
+            )
 
-                        for file in os.listdir(tmpdir_export):
-                            zf.write(os.path.join(tmpdir_export, file), file)
-                zip_buffer.seek(0)
+            # Descargar puntos filtrados si están visibles
+            if ver_ocupaciones and gdf_puntos_filtrados is not None and not gdf_puntos_filtrados.empty:
+                zip_buffer_puntos = BytesIO()
+                with zipfile.ZipFile(zip_buffer_puntos, 'w', zipfile.ZIP_DEFLATED) as zf_puntos:
+                    with tempfile.TemporaryDirectory() as tmpdir_export_puntos:
+                        shp_base_path_puntos = os.path.join(tmpdir_export_puntos, "ocupaciones_filtradas")
+                        gdf_puntos_filtrados.to_file(shp_base_path_puntos + ".shp")
+
+                        for file in os.listdir(tmpdir_export_puntos):
+                            zf_puntos.write(os.path.join(tmpdir_export_puntos, file), file)
+                zip_buffer_puntos.seek(0)
 
                 st.download_button(
-                    label="📅 Descargar shapefile filtrado (.zip)",
-                    data=zip_buffer.getvalue(),
-                    file_name="poligonos_monitoreo_filtrados.zip",
+                    label="📍 Descargar shapefile de ocupaciones filtrado (.zip)",
+                    data=zip_buffer_puntos.getvalue(),
+                    file_name="ocupaciones_filtradas.zip",
                     mime="application/zip"
                 )
-
-                html_bytes = m_poligonos.get_root().render().encode("utf-8")
-                st.download_button(
-                    label="🌐 Descargar mapa (HTML)",
-                    data=html_bytes,
-                    file_name="mapa_monitoreo_filtrado.html",
-                    mime="text/html"
-                )
-        else:
-            st.info("No hay datos de polígonos para mostrar en la tabla o descargar con los filtros actuales.")
-
-# --- TAB 2: ANÁLISIS DE OCUPACIONES (Puntos) ---
-with tab2:
-    st.subheader("📊 Análisis de Ocupaciones por Polígono")
-    st.markdown("Realiza un análisis espacial para contar las ocupaciones (puntos) dentro de cada polígono de monitoreo.")
-
-    if gdf_poligonos is None or gdf_puntos is None:
-        st.warning("⚠️ No se pudieron cargar los datos de polígonos o de puntos. El análisis no puede funcionar sin ambos.")
-        st.stop()
-
-    st.info("Cargando y procesando puntos para el análisis. Esto puede tardar un momento...")
-
-    # Realizar el Spatial Join
-    # Asegúrate de que ambas capas tengan una columna de índice única si no tienen una.
-    # Convertir 'id_poligon' y 'id_ocupac' a string para asegurar consistencia en el merge si los tipos originales varían
-    gdf_poligonos_for_join = gdf_poligonos.copy()
-    if 'id_poligon' in gdf_poligonos_for_join.columns:
-        gdf_poligonos_for_join['id_poligon'] = gdf_poligonos_for_join['id_poligon'].astype(str)
-
-    gdf_puntos_for_join = gdf_puntos.copy()
-    if 'id_ocupac' in gdf_puntos_for_join.columns:
-        gdf_puntos_for_join['id_ocupac'] = gdf_puntos_for_join['id_ocupac'].astype(str)
-    
-    # Asegúrate de que las columnas de nombre y localidad estén en el formato correcto (string) y en minúsculas
-    for col in ['nombre_pol', 'Localidad']:
-        if col in gdf_poligonos_for_join.columns:
-            gdf_poligonos_for_join[col] = gdf_poligonos_for_join[col].astype(str).str.lower()
-    if 'Localidad' in gdf_puntos_for_join.columns: # Points layer also has Localidad (after renaming from 'localidas')
-        gdf_puntos_for_join['Localidad'] = gdf_puntos_for_join['Localidad'].astype(str).str.lower()
-
-
-    try:
-        # Spatial join: Encontrar qué puntos caen dentro de qué polígonos
-        # Usamos `how='left'` para mantener todos los polígonos, incluso si no tienen puntos.
-        # Luego filtraremos para los que sí tienen intersección si es necesario.
-        # Es crucial que la capa de polígonos sea la `right` para que los atributos de polígono se unan a los puntos.
-        # Pero para contar puntos *por* polígono, queremos el resultado de la unión de puntos *a* polígonos.
-        # Usaremos `inner` join y luego contaremos, lo que es más directo para "puntos por polígono".
-        
-        # Primero, asegúrate de que el CRS sea el mismo para el sjoin
-        if gdf_poligonos_for_join.crs != gdf_puntos_for_join.crs:
-            gdf_puntos_for_join = gdf_puntos_for_join.to_crs(gdf_poligonos_for_join.crs)
-
-        gdf_joined_analysis = gpd.sjoin(gdf_puntos_for_join, gdf_poligonos_for_join, how="inner", predicate="within")
-
-        st.success(f"Se encontraron {len(gdf_joined_analysis)} ocupaciones con correspondencia en polígonos.")
-
-        if not gdf_joined_analysis.empty:
-            # Contar la cantidad de ocupaciones por polígono (usando el id_poligon de la capa de polígonos)
-            conteo_ocupaciones = gdf_joined_analysis.groupby('id_poligon').size().reset_index(name='Cantidad_Ocupaciones')
-
-            # Unir el conteo con la información original de los polígonos
-            # Seleccionamos solo las columnas relevantes de los polígonos para la tabla final
-            poligono_info_cols_for_analysis = ['id_poligon', 'nombre_pol', 'Localidad', 'Área_Ha_']
-            poligono_info_cols_for_analysis = [col for col in poligono_info_cols_for_analysis if col in gdf_poligonos.columns]
-
-            # Aseguramos que 'id_poligon' sea string en ambos para el merge
-            df_resultado_analisis = pd.merge(
-                gdf_poligonos[poligono_info_cols_for_analysis].astype({'id_poligon': str}),
-                conteo_ocupaciones.astype({'id_poligon': str}),
-                on='id_poligon',
-                how='left'
-            ).fillna({'Cantidad_Ocupaciones': 0}) # Rellenar polígonos sin ocupaciones con 0
-
-            df_resultado_analisis['Cantidad_Ocupaciones'] = df_resultado_analisis['Cantidad_Ocupaciones'].astype(int)
-            
-            # Formatear el Área_Ha_ para la tabla de resultados del análisis
-            if 'Área_Ha_' in df_resultado_analisis.columns:
-                df_resultado_analisis["Área_Ha_"] = df_resultado_analisis["Área_Ha_"].apply(
-                    lambda ha: f"{int(ha):,} ha + {int(round((ha - int(ha)) * 10000)):,} m²" if pd.notna(ha) and ha >= 0 else "N/A"
-                )
-
-            st.markdown("### 📈 Resumen de Ocupaciones por Polígono")
-            st.dataframe(df_resultado_analisis)
-
-            # Visualización de los resultados en el mapa
-            if st.checkbox("Mostrar mapa de análisis (Polígonos con Puntos)", value=True):
-                # Calcular bounds que incluyan ambas capas si ambas tienen geometrías
-                bounds_union = gdf_poligonos.total_bounds
-                if not gdf_puntos.empty:
-                    # Concat para calcular los bounds de ambos juntos
-                    combined_gdf = gpd.GeoDataFrame(pd.concat([gdf_poligonos.geometry, gdf_puntos.geometry], ignore_index=True), crs=gdf_poligonos.crs)
-                    bounds_union = combined_gdf.total_bounds
-                
-                centro_lat_analisis = (bounds_union[1] + bounds_union[3]) / 2
-                centro_lon_analisis = (bounds_union[0] + bounds_union[2]) / 2
-
-                with st.spinner("Generando mapa de análisis..."):
-                    m_analisis = folium.Map(location=[centro_lat_analisis, centro_lon_analisis], zoom_start=8, tiles=fondos_disponibles["OpenStreetMap"]) # Usar un fondo neutro
-
-                    # Añadir polígonos
-                    folium.GeoJson(
-                        gdf_poligonos,
-                        name="Polígonos de Monitoreo",
-                        style_function=lambda x: {
-                            "fillColor": "#5B8EE6",
-                            "color": "#1C3F93",
-                            "weight": 1.5,
-                            "fillOpacity": 0.3
-                        },
-                        tooltip=folium.GeoJsonTooltip(
-                            fields=['id_poligon', 'nombre_pol', 'Localidad', 'Área_Ha_'],
-                            aliases=['ID Polígono:', 'Nombre:', 'Localidad:', 'Área (Ha):'],
-                            localize=True
-                        )
-                    ).add_to(m_analisis)
-
-                    # Añadir puntos de ocupación
-                    folium.GeoJson(
-                        gdf_puntos,
-                        name="Puntos de Ocupación",
-                        marker=folium.CircleMarker(radius=3, fill_color="#FF0000", color="#FF0000", fill_opacity=0.7),
-                        tooltip=folium.GeoJsonTooltip(
-                            fields=['id_ocupac', 'Clasific', 'id_predio', 'Localidad', 'Fecha_Ocu', 'Observacio'],
-                            aliases=['ID Ocupación:', 'Clasificación:', 'ID Predio:', 'Localidad:', 'Fecha Ocupación:', 'Observación:'],
-                            localize=True
-                        )
-                    ).add_to(m_analisis)
-
-                    folium.LayerControl().add_to(m_analisis) # Añadir control de capas
-
-                    st_folium(m_analisis, width=1200, height=600)
-
-            # Opciones de descarga para el análisis
-            with st.expander("📥 Opciones de descarga (Análisis de Ocupaciones)"):
-                csv_analisis = df_resultado_analisis.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="📄 Descargar resultados de análisis como CSV",
-                    data=csv_analisis,
-                    file_name="analisis_ocupaciones_por_poligono.csv",
-                    mime="text/csv"
-                )
-
-        else:
-            st.info("No se encontraron ocupaciones dentro de los polígonos de monitoreo.")
-
-    except Exception as e:
-        st.error(f"❌ Error al realizar el análisis de ocupaciones: {e}")
-        st.exception(e)
-
+    else:
+        st.info("No hay datos de polígonos para mostrar en la tabla o descargar con los filtros actuales.")
 
 # --- Footer global para la pantalla principal del visor ---
 st.markdown(
