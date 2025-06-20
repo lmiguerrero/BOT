@@ -15,55 +15,68 @@ from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Mapanima - Geovisor de Polígonos de Monitoreo Simple", layout="wide")
 
-# --- Estilos generales e institucionales ---
+# --- Estilos generales e institucionales (Actualizados con la marca Bogotá) ---
 st.markdown("""
     <style>
+    /* Colores base de la marca Bogotá: Azul Oscuro principal y un tono más claro para acentos */
+    :root {
+        --bogota-blue-dark: #06038D; /* Pantone 2738 C */
+        --bogota-blue-medium: #1C3F93; /* Un azul medio para acentos, ajustado visualmente */
+        --bogota-blue-light: #5B8EE6; /* Un azul más claro para elementos interactivos */
+        --text-color-light: white;
+        --text-color-dark: black;
+    }
+
     /* Estilos generales de la aplicación */
     html, body, .stApp {
-        background-color: #1b2e1b; /* Fondo verde oscuro */
-        color: white;
+        background-color: var(--bogota-blue-dark); /* Fondo azul oscuro de Bogotá */
+        color: var(--text-color-light);
         font-family: 'Inter', sans-serif;
     }
     section[data-testid="stSidebar"] {
-        background-color: #c99c3b; /* Sidebar color institucional */
-        color: black;
+        background-color: var(--bogota-blue-medium); /* Sidebar con un tono de azul medio */
+        color: var(--text-color-light);
     }
     .stButton>button, .stDownloadButton>button {
-        background-color: #346b34; /* Botones verde */
-        color: white;
+        background-color: var(--bogota-blue-light); /* Botones con azul claro de Bogotá */
+        color: var(--text-color-light);
         border: none;
         border-radius: 6px;
+        transition: background-color 0.3s ease; /* Suaviza el cambio de color al pasar el ratón */
+    }
+    .stButton>button:hover, .stDownloadButton>button:hover {
+        background-color: #79A3EF; /* Tono ligeramente diferente al pasar el ratón */
     }
     /* Estilos para los campos de entrada */
     .stTextInput>div>div>input,
     .stSelectbox>div>div>div>input {
-        color: black;
-        background-color: white;
+        color: var(--text-color-dark);
+        background-color: var(--text-color-light);
         border-radius: 4px;
     }
     /* Contorno para el mapa */
     .element-container:has(> iframe) {
         height: 650px !important;
-        border: 2px solid #c99c3b; /* Contorno color institucional */
+        border: 2px solid var(--bogota-blue-light); /* Contorno con azul claro de Bogotá */
         border-radius: 8px;
     }
     /* Tooltips de Folium */
     .leaflet-tooltip {
         background-color: rgba(255, 255, 255, 0.9);
-        color: black;
+        color: var(--text-color-dark);
         font-weight: bold;
     }
     /* Dataframe de Streamlit */
     .stDataFrame {
-        background-color: white;
-        color: black;
+        background-color: var(--text-color-light);
+        color: var(--text-color-dark);
         border-radius: 8px;
     }
     /* Botones de descarga específicos */
     .stDownloadButton > button {
-        background-color: #ffffff;
-        color: #1b2e1b;
-        border: 1px solid #346b34;
+        background-color: var(--text-color-light);
+        color: var(--bogota-blue-dark);
+        border: 1px solid var(--bogota-blue-medium);
         border-radius: 6px;
         font-weight: bold;
     }
@@ -75,15 +88,15 @@ st.markdown("""
         width: 100%;
         text-align: center;
         padding: 10px 0;
-        background-color: #1b2e1b; /* Fondo verde oscuro */
-        color: #b0c9a8; /* Texto verde claro/gris */
+        background-color: var(--bogota-blue-dark); /* Fondo azul oscuro */
+        color: #b0c9a8; /* Texto claro (puede ajustarse a un tono de azul más claro si se prefiere) */
         font-size: 0.8em;
         z-index: 1000; /* Asegura que esté por encima de otros contenidos */
-        border-top: 1px solid #346b34; /* Un borde sutil */
+        border-top: 1px solid var(--bogota-blue-medium); /* Un borde sutil con azul medio */
     }
     /* Estilo para etiquetas (labels) de los widgets */
     label {
-        color: white !important;
+        color: var(--text-color-light) !important;
         font-weight: bold;
     }
     </style>
@@ -173,8 +186,8 @@ gdf_total = descargar_y_cargar_zip(url_zip_monitoreo)
 
 # --- Banner superior del visor ---
 with st.container():
-    st.image("https://placehold.co/800x100/1b2e1b/FFFFFF?text=VISOR+MONITOREO", use_container_width=True) # [Image of VISOR MONITOREO banner]
-
+    # Placeholder de imagen con colores de la marca Bogotá
+    st.image("https://placehold.co/800x100/06038D/FFFFFF?text=VISOR+MONITOREO", use_container_width=True) # 
 # --- VISOR PRINCIPAL ---
 if gdf_total is None:
     st.warning("⚠️ No se pudieron cargar los datos geográficos principales. El visor no puede funcionar sin ellos.")
@@ -297,10 +310,10 @@ if st.session_state["mostrar_mapa"]:
             m = folium.Map(location=[centro_lat, centro_lon], zoom_start=8, tiles=fondos_disponibles[fondo_seleccionado])
 
             def style_function(feature):
-                # Estilo para los polígonos de monitoreo
+                # Estilo para los polígonos de monitoreo con colores de Bogotá
                 return {
-                    "fillColor": "#346b34", # Verde oscuro
-                    "color": "#1b2e1b", # Borde más oscuro
+                    "fillColor": "#5B8EE6", # Azul claro de Bogotá para el relleno
+                    "color": "#1C3F93", # Azul medio de Bogotá para el borde
                     "weight": 1.5,
                     "fillOpacity": 0.6 if mostrar_relleno else 0
                 }
@@ -341,13 +354,13 @@ if st.session_state["mostrar_mapa"]:
 
             m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-            # Leyenda simple para el nuevo visor
+            # Leyenda simple para el nuevo visor con colores de Bogotá
             leyenda_html = '''
             <div style="position: absolute; bottom: 10px; right: 10px; z-index: 9999;
                         background-color: white; padding: 10px; border: 1px solid #ccc;
                         font-size: 14px; box-shadow: 2px 2px 4px rgba(0,0,0,0.1);">
                 <strong>Leyenda</strong><br>
-                <i style="background:#346b34; opacity:0.7; width:10px; height:10px; display:inline-block; border:1px solid #1b2e1b;"></i> Polígono de Monitoreo<br>
+                <i style="background:#5B8EE6; opacity:0.7; width:10px; height:10px; display:inline-block; border:1px solid #1C3F93;"></i> Polígono de Monitoreo<br>
             </div>
             '''
             m.get_root().html.add_child(folium.Element(leyenda_html))
@@ -401,10 +414,11 @@ if st.session_state["mostrar_mapa"]:
                 margin-top: 1em;
                 margin-bottom: 1.5em;
                 padding: 0.7em;
-                background-color: #e8f5e9;
+                background-color: #e8f5e9; /* Fondo claro para las estadísticas */
                 border-radius: 8px;
                 font-size: 16px;
-                color: #2e7d32;'>
+                color: var(--bogota-blue-dark); /* Texto oscuro para las estadísticas */
+            '>
                 <strong>📊 Estadísticas del resultado:</strong><br>
                 Polígonos filtrados: <strong>{total_poligonos}</strong><br>
                 {area_display}
